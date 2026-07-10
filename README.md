@@ -7,7 +7,7 @@ A Streamlit dashboard that converts the supplied NOAA/CPC shell-script workflow 
 - Live Week-1 and Week-2 NOAA/CPC GEFS excessive-heat probability products.
 - Tmax, Tmin, maximum/minimum Heat Index, and NOAA/CPC hybrid heat products.
 - Fixed-temperature and percentile exceedance thresholds for at least three consecutive days.
-- Official Suriname district boundaries, district statistics, station markers, clipping, and district zoom.
+- Suriname district boundaries, district statistics, station markers, clipping, and district zoom.
 - Atmospheric context maps for MSLP, 500-hPa geopotential height, 2-m temperature, and 10-m/925/850/700/200-hPa winds.
 - PNG, CSV, and processed NetCDF downloads.
 - Demo mode and automatic demo fallback when the NOAA server cannot be reached.
@@ -22,12 +22,28 @@ The original scripts used `xc.regrid()` primarily to put the NOAA field on the C
 app.py                         Streamlit entrypoint
 heat_dashboard/                Download, geospatial, demo and plotting modules
 data/boundaries/               Web-ready EPSG:4326 district GeoJSON
-data/shapefiles/               Original .shp/.shx/.dbf/.prj files
-assets/dashboard_concept.png   Original dashboard concept image
 requirements.txt               Streamlit Cloud Python dependencies
 .streamlit/config.toml         Theme and server settings
 tests/                         Lightweight local tests
 ```
+
+## District boundaries
+
+`data/boundaries/suriname_districts.geojson` contains **simplified,
+approximate** boundaries for the ten Suriname districts, generated for
+visualization after the original shapefiles were lost from the repository.
+To use exact official boundaries, replace that file with an EPSG:4326
+GeoJSON FeatureCollection that has one feature per district and a `name`
+property (files exported from the official shapefiles work directly); no
+code changes are needed.
+
+## NOAA endpoint configuration
+
+All NOAA/CPC URLs and filename templates live in `heat_dashboard/config.py`
+(`NOAA_BASE_URL`, `HeatProduct.filename`, `context_filename`,
+`wind_filenames`). If CPC reorganises its directory layout, update only
+that module. Whenever a download fails the app shows a warning and falls
+back to demo data, so the interface keeps working while URLs are stale.
 
 ## Run locally
 

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+# Load Arrow's native library before the other compiled extensions
+# (GEOS, HDF5, matplotlib): importing it late can crash the Streamlit
+# script thread when the dataframe tables are serialized.
+import pyarrow  # noqa: F401  # isort: skip
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -109,7 +114,7 @@ districts = cached_districts()
 country = country_geometry(districts)
 
 st.markdown('<div class="dashboard-title">Suriname Heat Forecast Dashboard</div>', unsafe_allow_html=True)
-st.markdown('<div class="dashboard-subtitle">NOAA/CPC GEFS Week 1–2 excessive-heat guidance with official Suriname district boundaries</div>', unsafe_allow_html=True)
+st.markdown('<div class="dashboard-subtitle">NOAA/CPC GEFS Week 1–2 excessive-heat guidance with Suriname district boundaries</div>', unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("Dashboard controls")
