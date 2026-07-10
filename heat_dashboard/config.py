@@ -23,11 +23,30 @@ BOUNDARY_FILE = PROJECT_ROOT / "data" / "boundaries" / "suriname_districts.geojs
 #: Map extent used for downloads and plotting: (west, east, south, north).
 SURINAME_BOUNDS = (-58.5, -53.5, 1.5, 6.5)
 
-#: Percentile exceedance thresholds offered in the sidebar.
-PERCENTILE_THRESHOLDS = (75, 85, 90, 95)
+#: Percentile exceedance thresholds offered in the sidebar (matching the
+#: NOAA/CPC Global Heat Hazard Outlook product set).
+PERCENTILE_THRESHOLDS = (80, 85, 90, 95)
 
-#: Root of the NOAA/CPC International Desks GEFS guidance served over HTTPS.
-NOAA_BASE_URL = "https://ftp.cpc.ncep.noaa.gov/international/gefs_heat"
+#: Root of the NOAA/CPC International Desks area served over HTTPS.
+NOAA_INTERNATIONAL_BASE = "https://ftp.cpc.ncep.noaa.gov/International"
+
+#: Directory holding the GEFS global heat products (fixed thresholds), with
+#: the percentile products in its ``percentile/`` subdirectory.
+NOAA_BASE_URL = f"{NOAA_INTERNATIONAL_BASE}/global_heat"
+
+#: Directory listings searched, in order, when no exact filename guess
+#: matches: the loader downloads each index page, extracts the ``.nc``
+#: links, and picks the file whose name matches the requested product.
+HEAT_LISTING_DIRECTORIES = (
+    f"{NOAA_BASE_URL}/",
+    f"{NOAA_BASE_URL}/percentile/",
+    f"{NOAA_INTERNATIONAL_BASE}/multi_heat/",
+)
+
+CONTEXT_LISTING_DIRECTORIES = (
+    f"{NOAA_INTERNATIONAL_BASE}/multi_heat/",
+    f"{NOAA_BASE_URL}/",
+)
 
 #: Seconds before a NOAA download attempt is abandoned.
 DOWNLOAD_TIMEOUT = 60
@@ -55,10 +74,10 @@ class HeatProduct:
     fixed_thresholds: tuple[int, ...]
 
     def filename(self, week: int, threshold: int) -> str:
-        """NetCDF filename for a fixed (°C) or percentile threshold.
+        """Best-guess NetCDF filename for a fixed (°C) or percentile threshold.
 
         Fixed thresholds are always below 50 °C and percentiles are always
-        75 or higher, so the magnitude alone identifies the threshold type.
+        80 or higher, so the magnitude alone identifies the threshold type.
         """
         if threshold >= 50:
             return f"{self.prefix}_p{threshold:02d}_wk{week}.nc"
@@ -67,11 +86,31 @@ class HeatProduct:
     def climatology_filename(self, week: int, percentile: int) -> str:
         return f"{self.prefix}_p{percentile:02d}_climo_wk{week}.nc"
 
-    def url(self, week: int, threshold: int) -> str:
-        return f"{NOAA_BASE_URL}/wk{week}/{self.filename(week, threshold)}"
+    def url_candidates(self, week: int, threshold: int) -> list[str]:
+        """Exact URLs to try before falling back to listing discovery."""
+        if threshold >= 50:
+            directories = (f"{NOAA_BASE_URL}/percentile/", f"{NOAA_BASE_URL}/")
+            names = (
+                f"{self.prefix}_p{threshold}_wk{week}.nc",
+                f"GEFS_{self.prefix}_p{threshold}_wk{week}.nc",
+                f"{self.prefix}_gep{threshold}_wk{week}.nc",
+            )
+        else:
+            directories = (f"{NOAA_BASE_URL}/",)
+            names = (
+                f"{self.prefix}_ge{threshold}c_wk{week}.nc",
+                f"{self.prefix}_ge{threshold}_wk{week}.nc",
+                f"GEFS_{self.prefix}_ge{threshold}_wk{week}.nc",
+            )
+        return [directory + name for directory in directories for name in names]
 
-    def climatology_url(self, week: int, percentile: int) -> str:
-        return f"{NOAA_BASE_URL}/wk{week}/{self.climatology_filename(week, percentile)}"
+    def climatology_url_candidates(self, week: int, percentile: int) -> list[str]:
+        directories = (f"{NOAA_BASE_URL}/percentile/", f"{NOAA_BASE_URL}/")
+        names = (
+            f"{self.prefix}_p{percentile}_climo_wk{week}.nc",
+            f"{self.prefix}_p{percentile}_threshold_wk{week}.nc",
+        )
+        return [directory + name for directory in directories for name in names]
 
 
 HEAT_PRODUCTS: dict[str, HeatProduct] = {
@@ -79,7 +118,7 @@ HEAT_PRODUCTS: dict[str, HeatProduct] = {
         prefix="tmax",
         label="Tmax",
         description="Probability that daily maximum 2-m temperature exceeds the selected threshold on at least three consecutive days.",
-        fixed_thresholds=(30, 32, 35, 38, 41),
+        fixed_thresholds=(33, 35, 37, 39, 41, 43, 45),
     ),
     "Minimum temperature (Tmin)": HeatProduct(
         prefix="tmin",
@@ -91,7 +130,7 @@ HEAT_PRODUCTS: dict[str, HeatProduct] = {
         prefix="himax",
         label="Max heat index",
         description="Probability that the daytime heat index (temperature and humidity combined) exceeds the selected threshold on at least three consecutive days.",
-        fixed_thresholds=(32, 35, 38, 41, 43),
+        fixed_thresholds=(33, 35, 37, 39, 41, 43, 45),
     ),
     "Minimum heat index": HeatProduct(
         prefix="himin",

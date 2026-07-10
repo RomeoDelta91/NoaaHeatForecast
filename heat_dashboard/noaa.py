@@ -11,16 +11,20 @@ demo data.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from datetime import date, timedelta
+from functools import lru_cache
 
 import numpy as np
 import requests
 import xarray as xr
 
 from .config import (
+    CONTEXT_LISTING_DIRECTORIES,
     CONTEXT_PRODUCTS,
     DOWNLOAD_TIMEOUT,
+    HEAT_LISTING_DIRECTORIES,
     HeatProduct,
     context_filename,
     context_url,
@@ -42,6 +46,75 @@ def _download(url: str) -> bytes:
     if not response.content:
         raise NOAADataError(f"Empty response from {url}")
     return response.content
+
+
+def parse_listing(html: str) -> tuple[str, ...]:
+    """Extract the ``.nc`` filenames from an Apache-style index page."""
+    names = re.findall(r'href="([^"?/]+\.nc)"', html, flags=re.IGNORECASE)
+    return tuple(sorted(set(names)))
+
+
+@lru_cache(maxsize=64)
+def _directory_files(directory: str) -> tuple[str, ...]:
+    """List the NetCDF files in a NOAA directory; empty when unreachable."""
+    try:
+        response = requests.get(directory, timeout=DOWNLOAD_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException:
+        return ()
+    return parse_listing(response.text)
+
+
+def filename_matches(name: str, token_groups: list[tuple[str, ...]], exclude: tuple[str, ...] = ()) -> bool:
+    """True when the name has one token from every group and none excluded."""
+    low = name.lower()
+    if any(token in low for token in exclude):
+        return False
+    return all(any(token in low for token in group) for group in token_groups)
+
+
+def _week_tokens(week: int) -> tuple[str, ...]:
+    return (f"wk{week}", f"week{week}", f"week-{week}", f"_w{week}", f"day{'1-7' if week == 1 else '8-14'}")
+
+
+def _discover_url(
+    directories: tuple[str, ...],
+    token_groups: list[tuple[str, ...]],
+    exclude: tuple[str, ...] = (),
+) -> str | None:
+    """Search directory listings for the newest file matching the tokens."""
+    for directory in directories:
+        matches = [name for name in _directory_files(directory) if filename_matches(name, token_groups, exclude)]
+        if matches:
+            return directory + sorted(matches)[-1]
+    return None
+
+
+def _resolve_and_download(
+    candidates: list[str],
+    directories: tuple[str, ...],
+    token_groups: list[tuple[str, ...]],
+    exclude: tuple[str, ...],
+    description: str,
+) -> tuple[str, bytes]:
+    """Try exact URL guesses, then fall back to listing discovery."""
+    tried = []
+    for url in candidates:
+        try:
+            return url, _download(url)
+        except NOAADataError:
+            tried.append(url)
+    discovered = _discover_url(directories, token_groups, exclude)
+    if discovered and discovered not in tried:
+        try:
+            return discovered, _download(discovered)
+        except NOAADataError:
+            tried.append(discovered)
+    raise NOAADataError(
+        f"No NOAA file found for {description}. "
+        f"Tried: {', '.join(tried) or 'none'}. "
+        f"Searched listings: {', '.join(directories)}."
+    )
 
 
 def _open_dataset(raw: bytes, url: str) -> xr.Dataset:
@@ -104,10 +177,9 @@ def _valid_period(week: int) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def _load_gridded(url: str, bounds: tuple[float, float, float, float]) -> tuple[xr.DataArray, bytes]:
-    raw = _download(url)
+def _decode(raw: bytes, url: str, bounds: tuple[float, float, float, float]) -> xr.DataArray:
     dataset = normalize_coordinates(_open_dataset(raw, url))
-    return _subset(_select_field(dataset), bounds), raw
+    return _subset(_select_field(dataset), bounds)
 
 
 def load_heat_probability(
@@ -117,8 +189,20 @@ def load_heat_probability(
     bounds: tuple[float, float, float, float],
 ) -> tuple[xr.DataArray, dict, bytes]:
     """Load one excessive-heat probability grid (percent, 0–100)."""
-    url = product.url(week, threshold)
-    field, raw = _load_gridded(url, bounds)
+    if threshold >= 50:
+        threshold_tokens = (f"p{threshold}", f"{threshold}p", f"{threshold}th")
+        exclude = ("climo", "clim", "thresh", "anom")
+    else:
+        threshold_tokens = (f"ge{threshold}", f"{threshold}c", f"above{threshold}", f"gt{threshold}", f"_{threshold}_", f"_{threshold}.")
+        exclude = ("climo", "clim", "anom", "p8", "p9")
+    url, raw = _resolve_and_download(
+        product.url_candidates(week, threshold),
+        HEAT_LISTING_DIRECTORIES,
+        [(product.prefix,), _week_tokens(week), threshold_tokens],
+        exclude,
+        f"{product.label} week {week} threshold {threshold}",
+    )
+    field = _decode(raw, url, bounds)
     values = np.asarray(field.values, dtype=float)
     if np.isfinite(values).any() and np.nanmax(values) <= 1.5:
         field = field * 100.0  # fractional probabilities → percent
@@ -133,7 +217,7 @@ def load_heat_probability(
         "threshold": threshold,
         "threshold_type": "percentile" if threshold >= 50 else "fixed_celsius",
         "url": url,
-        "filename": product.filename(week, threshold),
+        "filename": url.rsplit("/", 1)[-1],
         "valid_start": valid_start,
         "valid_end": valid_end,
     }
@@ -147,8 +231,14 @@ def load_percentile_climatology(
     bounds: tuple[float, float, float, float],
 ) -> tuple[xr.DataArray, dict, bytes]:
     """Load the local temperature (°C) matching a climatological percentile."""
-    url = product.climatology_url(week, percentile)
-    field, raw = _load_gridded(url, bounds)
+    url, raw = _resolve_and_download(
+        product.climatology_url_candidates(week, percentile),
+        HEAT_LISTING_DIRECTORIES,
+        [(product.prefix,), _week_tokens(week), (f"p{percentile}",), ("climo", "clim", "thresh")],
+        (),
+        f"{product.label} week {week} P{percentile} climatology",
+    )
+    field = _decode(raw, url, bounds)
     if np.isfinite(field.values).any() and float(np.nanmax(field.values)) > 150.0:
         field = field - 273.15  # Kelvin → Celsius
     field.attrs["units"] = "°C"
@@ -160,11 +250,41 @@ def load_percentile_climatology(
         "week": week,
         "percentile": percentile,
         "url": url,
-        "filename": product.climatology_filename(week, percentile),
+        "filename": url.rsplit("/", 1)[-1],
         "valid_start": valid_start,
         "valid_end": valid_end,
     }
     return field, metadata, raw
+
+
+_CONTEXT_VARIABLE_TOKENS = {
+    "mslp": ("mslp", "slp", "prmsl", "psl"),
+    "z500": ("z500", "hgt500", "500hgt", "gph500", "hgt_500"),
+    "t2m": ("t2m", "tmp2m", "2mt", "temp2m"),
+}
+
+_VIEW_TOKENS = {
+    "Average": ("avg", "mean", "ave"),
+    "Anomaly": ("anom",),
+    "Climatology": ("climo", "clim"),
+}
+
+_VIEW_EXCLUDE = {
+    "Average": ("anom", "climo", "clim"),
+    "Anomaly": ("climo", "clim"),
+    "Climatology": ("anom",),
+}
+
+
+def _load_context_view(variable: str, view: str, week: int, bounds) -> tuple[xr.DataArray, str]:
+    url, raw = _resolve_and_download(
+        [context_url(context_filename(variable, view, week))],
+        CONTEXT_LISTING_DIRECTORIES,
+        [_CONTEXT_VARIABLE_TOKENS.get(variable, (variable,)), _week_tokens(week), _VIEW_TOKENS[view]],
+        _VIEW_EXCLUDE[view],
+        f"{variable} {view} week {week}",
+    )
+    return _decode(raw, url, bounds), url
 
 
 def load_context_field(
@@ -176,16 +296,13 @@ def load_context_field(
     """Load one scalar context field (MSLP, Z500, or 2-m temperature)."""
     product = CONTEXT_PRODUCTS[product_name]
     if view in product.views:
-        filename = context_filename(product.variable, view, week)
-        url = context_url(filename)
-        field, _ = _load_gridded(url, bounds)
+        field, url = _load_context_view(product.variable, view, week, bounds)
+        filename = url.rsplit("/", 1)[-1]
         urls = [url]
     else:
         # Reconstruct the missing view: climatology = average − anomaly.
-        average_url = context_url(context_filename(product.variable, "Average", week))
-        anomaly_url = context_url(context_filename(product.variable, "Anomaly", week))
-        average, _ = _load_gridded(average_url, bounds)
-        anomaly, _ = _load_gridded(anomaly_url, bounds)
+        average, average_url = _load_context_view(product.variable, "Average", week, bounds)
+        anomaly, anomaly_url = _load_context_view(product.variable, "Anomaly", week, bounds)
         field = average - anomaly
         filename = "derived"
         urls = [average_url, anomaly_url]
@@ -218,9 +335,23 @@ def load_wind_field(
 ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, dict]:
     """Load wind components and speed for one level; returns (speed, u, v, metadata)."""
     u_name, v_name = wind_filenames(level, view, week)
-    u_url, v_url = context_url(u_name), context_url(v_name)
-    u, _ = _load_gridded(u_url, bounds)
-    v, _ = _load_gridded(v_url, bounds)
+    level_tokens = ("10m", "u10", "v10") if level == 10 else (str(level),)
+    u_url, u_raw = _resolve_and_download(
+        [context_url(u_name)],
+        CONTEXT_LISTING_DIRECTORIES,
+        [("uwnd", "ugrd", "u_"), level_tokens, _week_tokens(week), _VIEW_TOKENS[view]],
+        _VIEW_EXCLUDE[view],
+        f"u-wind {level} {view} week {week}",
+    )
+    v_url, v_raw = _resolve_and_download(
+        [context_url(v_name)],
+        CONTEXT_LISTING_DIRECTORIES,
+        [("vwnd", "vgrd", "v_"), level_tokens, _week_tokens(week), _VIEW_TOKENS[view]],
+        _VIEW_EXCLUDE[view],
+        f"v-wind {level} {view} week {week}",
+    )
+    u = _decode(u_raw, u_url, bounds)
+    v = _decode(v_raw, v_url, bounds)
     u, v = xr.align(u, v, join="inner")
     speed = np.hypot(u, v)
     speed.attrs["units"] = "m/s"
@@ -233,7 +364,7 @@ def load_wind_field(
         "week": week,
         "unit": "m/s",
         "url": [u_url, v_url],
-        "filename": [u_name, v_name],
+        "filename": [u_url.rsplit("/", 1)[-1], v_url.rsplit("/", 1)[-1]],
         "valid_start": valid_start,
         "valid_end": valid_end,
     }

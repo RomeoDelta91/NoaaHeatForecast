@@ -8,7 +8,9 @@ from heat_dashboard.config import HEAT_PRODUCTS, PERCENTILE_THRESHOLDS
 from heat_dashboard.noaa import (
     NOAADataError,
     dataarray_to_netcdf_bytes,
+    filename_matches,
     normalize_coordinates,
+    parse_listing,
 )
 
 
@@ -43,13 +45,74 @@ def test_dataarray_roundtrip_through_netcdf_bytes():
         assert np.allclose(restored["probability"].values, field.values, atol=1e-4)
 
 
-def test_product_urls_distinguish_threshold_types():
+def test_product_url_candidates_distinguish_threshold_types():
     product = HEAT_PRODUCTS["Maximum temperature (Tmax)"]
-    fixed_url = product.url(1, 35)
-    percentile_url = product.url(2, 90)
-    assert "ge35c" in fixed_url and "wk1" in fixed_url
-    assert "p90" in percentile_url and "wk2" in percentile_url
+    fixed = product.url_candidates(1, 35)
+    percentile = product.url_candidates(2, 90)
+    assert fixed and all("wk1" in url for url in fixed)
+    assert any("ge35" in url for url in fixed)
+    assert percentile and all("wk2" in url for url in percentile)
+    assert any("p90" in url for url in percentile)
+    assert any("/percentile/" in url for url in percentile)
     assert 90 in PERCENTILE_THRESHOLDS
+
+
+def test_parse_listing_extracts_netcdf_names():
+    html = """
+    <html><body><h1>Index of /International/global_heat</h1><pre>
+    <a href="?C=N;O=D">Name</a>
+    <a href="/International/">Parent Directory</a>
+    <a href="tmax_ge35c_wk1.nc">tmax_ge35c_wk1.nc</a> 10-Jul-2026 06:12 2.1M
+    <a href="tmax_ge35c_wk2.nc">tmax_ge35c_wk2.nc</a>
+    <a href="readme.txt">readme.txt</a>
+    <a href="percentile/">percentile/</a>
+    </pre></body></html>
+    """
+    names = parse_listing(html)
+    assert names == ("tmax_ge35c_wk1.nc", "tmax_ge35c_wk2.nc")
+
+
+def test_filename_matches_requires_all_groups():
+    groups = [("tmax",), ("wk1", "week1"), ("ge35", "35c")]
+    assert filename_matches("GEFS_tmax_ge35_wk1.nc", groups)
+    assert not filename_matches("tmax_ge35_wk2.nc", groups)
+    assert not filename_matches("tmin_ge35_wk1.nc", groups)
+    assert not filename_matches("tmax_ge35_wk1_climo.nc", groups, exclude=("climo",))
+
+
+def test_resolution_falls_back_to_listing_discovery(monkeypatch):
+    import heat_dashboard.noaa as noaa
+
+    def fake_download(url):
+        if url == "https://example/global_heat/GEFS_Tmax_above_35C_wk1_latest.nc":
+            return b"bytes"
+        raise noaa.NOAADataError(f"404 {url}")
+
+    def fake_listing(directory):
+        if directory == "https://example/global_heat/":
+            return ("GEFS_Tmax_above_35C_wk1_latest.nc", "GEFS_Tmax_above_35C_wk1_climo.nc")
+        return ()
+
+    monkeypatch.setattr(noaa, "_download", fake_download)
+    monkeypatch.setattr(noaa, "_directory_files", fake_listing)
+    url, raw = noaa._resolve_and_download(
+        ["https://example/global_heat/tmax_ge35c_wk1.nc"],
+        ("https://example/global_heat/", "https://example/global_heat/percentile/"),
+        [("tmax",), ("wk1",), ("ge35", "35c")],
+        ("climo",),
+        "test product",
+    )
+    assert url == "https://example/global_heat/GEFS_Tmax_above_35C_wk1_latest.nc"
+    assert raw == b"bytes"
+
+    with pytest.raises(NOAADataError, match="test product"):
+        noaa._resolve_and_download(
+            ["https://example/global_heat/missing.nc"],
+            ("https://example/empty/",),
+            [("tmax",), ("wk1",), ("ge35",)],
+            (),
+            "test product",
+        )
 
 
 def test_every_product_has_at_least_two_fixed_thresholds():

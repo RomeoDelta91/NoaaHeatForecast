@@ -61,9 +61,9 @@ def demo_probability(week: int, product_name: str, threshold: int) -> tuple[xr.D
     coastal = np.clip((lat2d - 1.5) / 5.0, 0, 1) ** 1.5
     # Higher thresholds are progressively harder to exceed.
     if threshold >= 50:  # percentile threshold
-        severity = (threshold - 75) / 25.0
+        severity = (threshold - 80) / 20.0
     else:  # fixed °C threshold
-        severity = np.clip((threshold - 30) / 13.0, 0, 1)
+        severity = np.clip((threshold - 33) / 12.0, 0, 1)
     base = 15 + 65 * coastal * (1.0 - 0.65 * severity)
     noise = _smooth_noise(lon2d.shape, _seed("prob", week, product_name, threshold)) * 18
     values = np.clip(base + noise + (5 if week == 2 else 0), 0, 100)

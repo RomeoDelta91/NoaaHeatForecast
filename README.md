@@ -40,11 +40,18 @@ district.
 
 ## NOAA endpoint configuration
 
-All NOAA/CPC URLs and filename templates live in `heat_dashboard/config.py`
-(`NOAA_BASE_URL`, `HeatProduct.filename`, `context_filename`,
-`wind_filenames`). If CPC reorganises its directory layout, update only
-that module. Whenever a download fails the app shows a warning and falls
-back to demo data, so the interface keeps working while URLs are stale.
+The GEFS heat products are read from
+`https://ftp.cpc.ncep.noaa.gov/International/global_heat/` (fixed
+thresholds) and its `percentile/` subdirectory. All URLs and filename
+templates live in `heat_dashboard/config.py`. When an exact filename guess
+returns 404, the loader downloads the directory listings named in
+`HEAT_LISTING_DIRECTORIES`/`CONTEXT_LISTING_DIRECTORIES`, extracts the
+`.nc` links, and picks the file whose name matches the requested product,
+week, and threshold — so the app survives NOAA renaming files or moving
+them between the listed directories. If CPC moves to an entirely new
+directory, add it to those tuples. Whenever every lookup fails the app
+shows a warning listing the URLs it tried and falls back to demo data, so
+the interface keeps working while paths are stale.
 
 ## Run locally
 
