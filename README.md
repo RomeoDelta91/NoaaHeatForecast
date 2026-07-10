@@ -40,16 +40,27 @@ district.
 
 ## NOAA endpoint configuration
 
-The GEFS heat products are read from
-`https://ftp.cpc.ncep.noaa.gov/International/global_heat/` (fixed
-thresholds) and its `percentile/` subdirectory. All URLs and filename
-templates live in `heat_dashboard/config.py`. When an exact filename guess
-returns 404, the loader downloads the directory listings named in
+The dashboard reads NOAA/CPC's pre-processed Week-1/Week-2 GEFS products
+(weekly means, anomalies, and heat-exceedance probabilities — not raw
+ensemble members) from
+
+```text
+https://ftp.cpc.ncep.noaa.gov/International/PREPARE_africa/subseasonal/realtime/data/
+```
+
+Heat filenames follow `wk{week}_{product}{threshold}_c3.nc`, where the
+product is `tmax`, `tmin`, `himax`, `himin`, `hybmax`, or `hybmin`, the
+threshold is a fixed limit (`35`) or percentile (`90`), and `c3` means the
+threshold must hold for at least three consecutive days — for example
+`wk1_tmax35_c3.nc` or `wk2_himax35_c3.nc`. The percentile climatologies
+follow `wk{week}_{product}climo{percentile}.nc` (e.g. `wk1_tmaxclimo90.nc`).
+
+All URL templates live in `heat_dashboard/config.py`. When an exact
+filename returns 404, the loader downloads the directory listings named in
 `HEAT_LISTING_DIRECTORIES`/`CONTEXT_LISTING_DIRECTORIES`, extracts the
 `.nc` links, and picks the file whose name matches the requested product,
 week, and threshold — so the app survives NOAA renaming files or moving
-them between the listed directories. If CPC moves to an entirely new
-directory, add it to those tuples. Whenever every lookup fails the app
+them between the listed directories. Whenever every lookup fails the app
 shows a warning listing the URLs it tried and falls back to demo data, so
 the interface keeps working while paths are stale.
 

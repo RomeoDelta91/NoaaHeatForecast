@@ -45,16 +45,28 @@ def test_dataarray_roundtrip_through_netcdf_bytes():
         assert np.allclose(restored["probability"].values, field.values, atol=1e-4)
 
 
-def test_product_url_candidates_distinguish_threshold_types():
+def test_product_urls_follow_documented_pattern():
     product = HEAT_PRODUCTS["Maximum temperature (Tmax)"]
-    fixed = product.url_candidates(1, 35)
-    percentile = product.url_candidates(2, 90)
-    assert fixed and all("wk1" in url for url in fixed)
-    assert any("ge35" in url for url in fixed)
-    assert percentile and all("wk2" in url for url in percentile)
-    assert any("p90" in url for url in percentile)
-    assert any("/percentile/" in url for url in percentile)
+    assert product.url_candidates(1, 35) == [
+        "https://ftp.cpc.ncep.noaa.gov/International/PREPARE_africa/subseasonal/realtime/data/wk1_tmax35_c3.nc"
+    ]
+    assert product.url_candidates(2, 90) == [
+        "https://ftp.cpc.ncep.noaa.gov/International/PREPARE_africa/subseasonal/realtime/data/wk2_tmax90_c3.nc"
+    ]
+    assert product.climatology_url_candidates(1, 90) == [
+        "https://ftp.cpc.ncep.noaa.gov/International/PREPARE_africa/subseasonal/realtime/data/wk1_tmaxclimo90.nc"
+    ]
     assert 90 in PERCENTILE_THRESHOLDS
+
+
+def test_documented_examples_from_reference_document():
+    # Examples straight from the NOAA data-sources document.
+    base = "https://ftp.cpc.ncep.noaa.gov/International/PREPARE_africa/subseasonal/realtime/data/"
+    assert HEAT_PRODUCTS["Maximum heat index"].url_candidates(2, 35) == [base + "wk2_himax35_c3.nc"]
+    assert HEAT_PRODUCTS["Minimum temperature (Tmin)"].url_candidates(1, 29) == [base + "wk1_tmin29_c3.nc"]
+    assert HEAT_PRODUCTS["Minimum temperature (Tmin)"].climatology_url_candidates(1, 90) == [base + "wk1_tminclimo90.nc"]
+    prefixes = {product.prefix for product in HEAT_PRODUCTS.values()}
+    assert prefixes == {"tmax", "tmin", "himax", "himin", "hybmax", "hybmin"}
 
 
 def test_parse_listing_extracts_netcdf_names():
@@ -78,6 +90,18 @@ def test_filename_matches_requires_all_groups():
     assert not filename_matches("tmax_ge35_wk2.nc", groups)
     assert not filename_matches("tmin_ge35_wk1.nc", groups)
     assert not filename_matches("tmax_ge35_wk1_climo.nc", groups, exclude=("climo",))
+
+
+def test_filename_matches_documented_naming():
+    exclude = ("climo", "clim", "anom")
+    fixed_groups = [("tmax",), ("wk1",), ("tmax35", "ge35", "35c")]
+    assert filename_matches("wk1_tmax35_c3.nc", fixed_groups, exclude)
+    assert not filename_matches("wk1_tmax90_c3.nc", fixed_groups, exclude)
+    assert not filename_matches("wk2_tmax35_c3.nc", fixed_groups, exclude)
+
+    climo_groups = [("tmin",), ("wk1",), ("climo90", "p90", "90"), ("climo", "clim", "thresh")]
+    assert filename_matches("wk1_tminclimo90.nc", climo_groups)
+    assert not filename_matches("wk1_tmin90_c3.nc", climo_groups)
 
 
 def test_resolution_falls_back_to_listing_discovery(monkeypatch):
@@ -113,6 +137,44 @@ def test_resolution_falls_back_to_listing_discovery(monkeypatch):
             (),
             "test product",
         )
+
+
+def test_load_heat_probability_pipeline_with_mocked_download(monkeypatch):
+    """End-to-end loader test: only the HTTP download is mocked.
+
+    The synthetic file mimics a NOAA grid: 0-360 longitudes, descending
+    latitudes, an extra time dimension, and fractional probabilities.
+    """
+    import heat_dashboard.noaa as noaa
+    from heat_dashboard.config import SURINAME_BOUNDS
+
+    lon = np.arange(300.0, 308.0, 1.0)  # 300-307 °E == -60..-53 °W
+    lat = np.arange(8.0, -1.0, -1.0)
+    data = np.random.default_rng(7).uniform(0, 1, (1, lat.size, lon.size))
+    dataset = xr.Dataset(
+        {"prob": (("time", "latitude", "longitude"), data.astype("float32"))},
+        coords={"time": [0], "latitude": lat, "longitude": lon},
+    )
+    raw = bytes(dataset.to_netcdf())
+
+    requested = {}
+
+    def fake_download(url):
+        requested["url"] = url
+        return raw
+
+    monkeypatch.setattr(noaa, "_download", fake_download)
+    product = HEAT_PRODUCTS["Maximum temperature (Tmax)"]
+    field, metadata, payload = noaa.load_heat_probability(product, 1, 35, SURINAME_BOUNDS)
+
+    assert requested["url"].endswith("/PREPARE_africa/subseasonal/realtime/data/wk1_tmax35_c3.nc")
+    assert payload == raw
+    assert metadata["filename"] == "wk1_tmax35_c3.nc"
+    assert float(field["lon"].min()) >= SURINAME_BOUNDS[0]
+    assert float(field["lon"].max()) <= SURINAME_BOUNDS[1]
+    values = field.values
+    assert np.isfinite(values).any()
+    assert np.nanmax(values) <= 100.0 and np.nanmax(values) > 1.5  # rescaled to percent
 
 
 def test_every_product_has_at_least_two_fixed_thresholds():

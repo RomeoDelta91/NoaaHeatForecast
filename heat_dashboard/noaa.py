@@ -190,11 +190,11 @@ def load_heat_probability(
 ) -> tuple[xr.DataArray, dict, bytes]:
     """Load one excessive-heat probability grid (percent, 0–100)."""
     if threshold >= 50:
-        threshold_tokens = (f"p{threshold}", f"{threshold}p", f"{threshold}th")
+        threshold_tokens = (f"{product.prefix}{threshold}", f"p{threshold}", f"{threshold}th")
         exclude = ("climo", "clim", "thresh", "anom")
     else:
-        threshold_tokens = (f"ge{threshold}", f"{threshold}c", f"above{threshold}", f"gt{threshold}", f"_{threshold}_", f"_{threshold}.")
-        exclude = ("climo", "clim", "anom", "p8", "p9")
+        threshold_tokens = (f"{product.prefix}{threshold}", f"ge{threshold}", f"{threshold}c")
+        exclude = ("climo", "clim", "anom")
     url, raw = _resolve_and_download(
         product.url_candidates(week, threshold),
         HEAT_LISTING_DIRECTORIES,
@@ -234,7 +234,7 @@ def load_percentile_climatology(
     url, raw = _resolve_and_download(
         product.climatology_url_candidates(week, percentile),
         HEAT_LISTING_DIRECTORIES,
-        [(product.prefix,), _week_tokens(week), (f"p{percentile}",), ("climo", "clim", "thresh")],
+        [(product.prefix,), _week_tokens(week), (f"climo{percentile}", f"p{percentile}", str(percentile)), ("climo", "clim", "thresh")],
         (),
         f"{product.label} week {week} P{percentile} climatology",
     )

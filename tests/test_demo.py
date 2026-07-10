@@ -19,7 +19,7 @@ def test_demo_probability_deterministic():
 
 
 def test_demo_probability_threshold_monotonic_on_average():
-    low, _ = demo_probability(1, "Maximum temperature (Tmax)", 30)
+    low, _ = demo_probability(1, "Maximum temperature (Tmax)", 33)
     high, _ = demo_probability(1, "Maximum temperature (Tmax)", 41)
     assert float(low.values.mean()) > float(high.values.mean())
 
