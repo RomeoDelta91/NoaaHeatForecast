@@ -7,7 +7,7 @@ A Streamlit dashboard that converts the supplied NOAA/CPC shell-script workflow 
 - Live Week-1 and Week-2 NOAA/CPC GEFS excessive-heat probability products.
 - Tmax, Tmin, maximum/minimum Heat Index, and NOAA/CPC hybrid heat products.
 - Fixed-temperature and percentile exceedance thresholds for at least three consecutive days.
-- Suriname district boundaries, district statistics, station markers, clipping, and district zoom.
+- Official Suriname district boundaries, district statistics, station markers, clipping, and district zoom.
 - Atmospheric context maps for MSLP, 500-hPa geopotential height, 2-m temperature, and 10-m/925/850/700/200-hPa winds.
 - PNG, CSV, and processed NetCDF downloads.
 - Demo mode and automatic demo fallback when the NOAA server cannot be reached.
@@ -22,6 +22,7 @@ The original scripts used `xc.regrid()` primarily to put the NOAA field on the C
 app.py                         Streamlit entrypoint
 heat_dashboard/                Download, geospatial, demo and plotting modules
 data/boundaries/               Web-ready EPSG:4326 district GeoJSON
+data/shapefiles/               Original .shp/.shx/.dbf/.prj files
 requirements.txt               Streamlit Cloud Python dependencies
 .streamlit/config.toml         Theme and server settings
 tests/                         Lightweight local tests
@@ -29,13 +30,13 @@ tests/                         Lightweight local tests
 
 ## District boundaries
 
-`data/boundaries/suriname_districts.geojson` contains **simplified,
-approximate** boundaries for the ten Suriname districts, generated for
-visualization after the original shapefiles were lost from the repository.
-To use exact official boundaries, replace that file with an EPSG:4326
-GeoJSON FeatureCollection that has one feature per district and a `name`
-property (files exported from the official shapefiles work directly); no
-code changes are needed.
+`data/boundaries/suriname_districts.geojson` is derived from the official
+`data/shapefiles/DistriktenSuriname` shapefile (UTM Zone 21N), reprojected
+to EPSG:4326 and lightly simplified (~50 m tolerance) for the web. The app
+reads only the GeoJSON at runtime, so no GDAL/GeoPandas dependency is
+needed. To regenerate it after updating the shapefiles, reproject each
+feature to WGS84 and write a FeatureCollection with a `name` property per
+district.
 
 ## NOAA endpoint configuration
 
