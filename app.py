@@ -53,8 +53,9 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-    .block-container {padding-top: 1.25rem; padding-bottom: 2rem; max-width: 1600px;}
+    .block-container {padding-top: 4rem; padding-bottom: 2rem; max-width: 1600px;}
     [data-testid="stMetric"] {background: white; border: 1px solid #e5e7eb; padding: 0.85rem 1rem; border-radius: 0.8rem; box-shadow: 0 1px 3px rgba(15,23,42,.06);}
+    [data-testid="stMetricValue"] {font-size: 1.55rem; line-height: 1.2; white-space: normal; overflow: visible;}
     [data-testid="stSidebar"] {border-right: 1px solid #e5e7eb;}
     .dashboard-title {font-size: 2rem; font-weight: 800; line-height: 1.05; color: #111827; margin-bottom: .15rem;}
     .dashboard-subtitle {color: #6b7280; margin-bottom: .8rem;}
@@ -92,10 +93,15 @@ def cached_wind(level: int, view: str, week: int, bounds):
 
 
 def formatted_period(metadata: dict) -> str:
+    """Compact validity range that fits inside a metric card."""
     try:
-        start = datetime.fromisoformat(metadata["valid_start"]).strftime("%d %b %Y")
-        end = datetime.fromisoformat(metadata["valid_end"]).strftime("%d %b %Y")
-        return f"{start} – {end}"
+        start = datetime.fromisoformat(metadata["valid_start"])
+        end = datetime.fromisoformat(metadata["valid_end"])
+        if start.year == end.year and start.month == end.month:
+            return f"{start.day}–{end.day} {end.strftime('%b %Y')}"
+        if start.year == end.year:
+            return f"{start.day} {start.strftime('%b')} – {end.day} {end.strftime('%b %Y')}"
+        return f"{start.strftime('%d %b %Y')} – {end.strftime('%d %b %Y')}"
     except Exception:
         return "Unavailable"
 
