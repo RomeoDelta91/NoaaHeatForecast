@@ -132,3 +132,39 @@ def district_statistics(field: xr.DataArray, districts: list[District], probabil
 
     frame = pd.DataFrame(rows)
     return frame.sort_values("Mean probability (%)", ascending=False, ignore_index=True)
+
+
+def district_tercile_statistics(field: xr.DataArray, districts: list[District]) -> pd.DataFrame:
+    """Per-district mean tercile probabilities and the dominant category.
+
+    ``field`` must have (category, lat, lon) dimensions with the category
+    labels as coordinates. Districts without a grid-cell centre fall back
+    to the nearest grid point and are flagged as estimates.
+    """
+    categories = [str(item) for item in field["category"].values]
+    lon2d, lat2d = _grid_centres(field)
+    values = np.asarray(field.values, dtype=float)
+
+    rows = []
+    for district in districts:
+        inside = contains_xy(district.geometry, lon2d, lat2d)
+        estimate = False
+        means = []
+        for index in range(len(categories)):
+            cell_values = values[index][inside]
+            cell_values = cell_values[np.isfinite(cell_values)]
+            means.append(float(cell_values.mean()) if cell_values.size else float("nan"))
+        if not any(np.isfinite(means)):
+            estimate = True
+            point = district.geometry.representative_point()
+            nearest = field.sel(lon=point.x, lat=point.y, method="nearest")
+            means = [float(value) for value in np.asarray(nearest.values, dtype=float)]
+        dominant = categories[int(np.nanargmax(means))] if any(np.isfinite(means)) else "Unavailable"
+        row = {"District": district.name}
+        for name, value in zip(categories, means):
+            row[f"{name} (%)"] = value
+        row["Dominant tercile"] = dominant
+        row["Nearest-grid estimate"] = estimate
+        rows.append(row)
+
+    return pd.DataFrame(rows)
