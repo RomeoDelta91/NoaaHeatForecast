@@ -191,6 +191,8 @@ def test_context_and_wind_urls_follow_documented_pattern():
     assert context_url(context_filename("mslp", "Anomaly", 1)) == base + "wk1_mslpa.nc"
     assert context_url(context_filename("hgt500", "Average", 1)) == base + "wk1_hgt500t.nc"
     assert context_url(context_filename("hgt500", "Anomaly", 1)) == base + "wk1_hgt500a.nc"
+    assert context_url(context_filename("t2m", "Average", 1)) == base + "wk1_t2mt.nc"
+    assert context_url(context_filename("t2m", "Anomaly", 1)) == base + "wk1_t2ma.nc"
     assert wind_filenames(850, "Average", 1) == ("wk1_u850t.nc", "wk1_v850t.nc")
     assert wind_filenames(850, "Anomaly", 1) == ("wk1_u850a.nc", "wk1_v850a.nc")
     assert wind_filenames(10, "Average", 2) == ("wk2_u10mt.nc", "wk2_v10mt.nc")
