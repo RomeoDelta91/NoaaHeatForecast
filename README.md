@@ -117,8 +117,7 @@ No passwords or Streamlit secrets are required. The app downloads public NOAA/CP
 
 ## Author
 
-Gemaakt door: **Ritesh Rajai** — a personal project developed in private
-time; not a product of the Meteorological Service of Suriname.
+Gemaakt door: **Ritesh Rajai**
 
 ## Acknowledgement
 

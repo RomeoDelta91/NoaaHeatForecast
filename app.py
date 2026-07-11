@@ -337,6 +337,4 @@ st.divider()
 st.caption(
     "This dashboard visualizes NOAA/CPC GEFS guidance and is not an official warning product. Verify operational decisions against observations, local procedures, and the latest meteorological analysis."
 )
-st.caption(
-    "Gemaakt door: Ritesh Rajai — persoonlijk project, ontwikkeld in eigen tijd; geen product van de Meteorologische Dienst Suriname."
-)
+st.caption("Gemaakt door: Ritesh Rajai")
