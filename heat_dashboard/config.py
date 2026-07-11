@@ -59,29 +59,6 @@ CONTEXT_LISTING_DIRECTORIES = (
     f"{NOAA_INTERNATIONAL_BASE}/multi_heat/",
 )
 
-#: Directory with the subseasonal precipitation products (raw GEFS
-#: tercile probabilities per period): ``gefs_week{token}_tercile.nc``.
-SUBSEASONAL_DATA_URL = f"{NOAA_INTERNATIONAL_BASE}/subseasonal2/"
-
-#: Forecast periods offered by the subseasonal precipitation products:
-#: label -> (URL token, first valid day, last valid day).
-SUBSEASONAL_PERIODS = {
-    "Week 1": ("1", 1, 7),
-    "Week 2": ("2", 8, 14),
-    "Week 3–4": ("34", 15, 28),
-}
-
-#: Category order inside the tercile files (matches the reference tool).
-TERCILE_CATEGORIES = ("Below normal", "Near normal", "Above normal")
-
-
-def tercile_filename(period_token: str) -> str:
-    return f"gefs_week{period_token}_tercile.nc"
-
-
-def tercile_url(period_token: str) -> str:
-    return SUBSEASONAL_DATA_URL + tercile_filename(period_token)
-
 #: Seconds before a NOAA download attempt is abandoned.
 DOWNLOAD_TIMEOUT = 60
 

@@ -26,12 +26,8 @@ from .config import (
     DOWNLOAD_TIMEOUT,
     HEAT_LISTING_DIRECTORIES,
     HeatProduct,
-    SUBSEASONAL_DATA_URL,
-    SUBSEASONAL_PERIODS,
-    TERCILE_CATEGORIES,
     context_filename,
     context_url,
-    tercile_url,
     wind_filenames,
     wind_level_tag,
     NOAA_BASE_URL,
@@ -389,78 +385,6 @@ def load_wind_field(
         "valid_end": valid_end,
     }
     return speed, u, v, metadata
-
-
-def _select_tercile_field(dataset: xr.Dataset) -> xr.DataArray:
-    """Pick the tercile variable and keep its 3-category dimension.
-
-    The reference tool reads variable ``precip`` whose non-spatial
-    dimension of size 3 holds the below/near/above-normal probabilities
-    (in that order); any other extra dimension (e.g. time) is reduced to
-    its first element.
-    """
-    if "precip" in dataset.data_vars:
-        field = dataset["precip"]
-    else:
-        field = _select_field_with_categories(dataset)
-    category_dim = None
-    for dim in field.dims:
-        if dim in ("lat", "lon"):
-            continue
-        if field.sizes[dim] == 3 and category_dim is None:
-            category_dim = dim
-        else:
-            field = field.isel({dim: 0})
-    if category_dim is None:
-        raise NOAADataError("Tercile dataset has no 3-category probability dimension.")
-    field = field.rename({category_dim: "category"})
-    field = field.assign_coords(category=list(TERCILE_CATEGORIES))
-    return field.transpose("category", "lat", "lon")
-
-
-def _select_field_with_categories(dataset: xr.Dataset) -> xr.DataArray:
-    for variable in dataset.data_vars.values():
-        if "lat" in variable.dims and "lon" in variable.dims:
-            return variable
-    raise NOAADataError("Dataset contains no gridded variable with lat/lon dimensions.")
-
-
-def load_precip_terciles(
-    period: str,
-    bounds: tuple[float, float, float, float],
-) -> tuple[xr.DataArray, dict, bytes]:
-    """Load raw GEFS precipitation tercile probabilities (percent, 0-100).
-
-    Returns a (category, lat, lon) DataArray with the below-, near- and
-    above-normal probabilities for the requested period label.
-    """
-    token, start_day, end_day = SUBSEASONAL_PERIODS[period]
-    url, raw = _resolve_and_download(
-        [tercile_url(token)],
-        (SUBSEASONAL_DATA_URL,),
-        [("tercile",), (f"week{token}",)],
-        ("hind", "fcst", "chirps"),
-        f"GEFS precipitation terciles {period}",
-    )
-    dataset = normalize_coordinates(_open_dataset(raw, url))
-    field = _subset(_select_tercile_field(dataset), bounds)
-    values = np.asarray(field.values, dtype=float)
-    if np.isfinite(values).any() and np.nanmax(values) <= 1.5:
-        field = field * 100.0  # fractional probabilities -> percent
-    field = field.clip(0, 100)
-    field.attrs["units"] = "%"
-    issuance = date.today()
-    metadata = {
-        "source": "NOAA/CPC GEFS subseasonal",
-        "product": "Precipitation tercile probabilities",
-        "period": period,
-        "categories": list(TERCILE_CATEGORIES),
-        "url": url,
-        "filename": url.rsplit("/", 1)[-1],
-        "valid_start": (issuance + timedelta(days=start_day)).isoformat(),
-        "valid_end": (issuance + timedelta(days=end_day)).isoformat(),
-    }
-    return field, metadata, raw
 
 
 def dataarray_to_netcdf_bytes(field: xr.DataArray, name: str) -> bytes:

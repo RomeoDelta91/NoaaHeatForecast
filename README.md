@@ -9,7 +9,6 @@ A Streamlit dashboard that converts the supplied NOAA/CPC shell-script workflow 
 - Fixed-temperature and percentile exceedance thresholds for at least three consecutive days.
 - Official Suriname district boundaries, district statistics, station markers, clipping, and district zoom.
 - Atmospheric context maps for MSLP, 500-hPa geopotential height, 2-m temperature, and 10-m/925/850/700/200-hPa winds.
-- Subseasonal precipitation outlooks (Week 1, Week 2, and Week 3–4): raw GEFS tercile probabilities rendered as dominant-tercile maps with district statistics.
 - PNG, CSV, and processed NetCDF downloads.
 - Demo mode and automatic demo fallback when the NOAA server cannot be reached.
 
@@ -62,14 +61,6 @@ the view suffix is `t` for the weekly mean (total) and `a` for the anomaly
 `wk1_hgt500t.nc` for 500-hPa height, and `wk1_u850t.nc`/`wk1_v850t.nc` for
 the 850-hPa wind components. No climatology files are published for these
 fields; the app reconstructs climatology as weekly mean minus anomaly.
-
-The subseasonal precipitation section reads the raw GEFS tercile
-probabilities from
-`https://ftp.cpc.ncep.noaa.gov/International/subseasonal2/gefs_week{wk}_tercile.nc`
-with `wk` = `1`, `2`, or `34` (Week 3–4). The calibrated products from the
-reference tool (CCA, ELR, EPOELM via XCast) train models on hindcasts and
-CHIRPS observations at every run; they are deliberately not executed
-inside this dashboard.
 
 All URL templates live in `heat_dashboard/config.py`. When an exact
 filename returns 404, the loader downloads the directory listings named in

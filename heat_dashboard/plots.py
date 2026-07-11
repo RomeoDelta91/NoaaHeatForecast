@@ -186,68 +186,6 @@ def context_map(
     return fig
 
 
-def _half_colormap(name: str, start: float, stop: float, n: int = 128):
-    from matplotlib.colors import LinearSegmentedColormap
-
-    base = plt.get_cmap(name)
-    return LinearSegmentedColormap.from_list(f"{name}_{start}_{stop}", base(np.linspace(start, stop, n)))
-
-
-def tercile_map(
-    field: xr.DataArray,
-    districts: list[District],
-    title: str,
-    extent: tuple[float, float, float, float],
-    selected_district: str | None = None,
-    show_boundaries: bool = True,
-    show_labels: bool = True,
-    show_stations: bool = True,
-):
-    """Dominant precipitation-tercile map in the NOAA/CPC reference style.
-
-    Brown shades mark cells where below normal is the most likely tercile,
-    grey near normal, and green above normal; shading depth follows the
-    dominant category's probability, with one colorbar per category.
-    """
-    fig, ax = _base_axes(title, extent)
-    values = np.asarray(field.values, dtype=float)  # (category, lat, lon)
-    valid = np.isfinite(values).all(axis=0)
-    filled = np.where(np.isfinite(values), values, -np.inf)
-    dominant = np.argmax(filled, axis=0)
-    dominant_value = np.take_along_axis(values, dominant[None], axis=0)[0]
-
-    lon = field["lon"].values
-    lat = field["lat"].values
-    layers = (
-        (0, _half_colormap("BrBG_r", 0.5, 1.0), 30, 85),  # below normal: browns
-        (1, _half_colormap("Greys", 0.0, 0.55), 30, 55),  # near normal: greys
-        (2, _half_colormap("BrBG", 0.5, 1.0), 30, 85),  # above normal: greens
-    )
-    meshes = []
-    for index, cmap, vmin, vmax in layers:
-        layer = np.where(valid & (dominant == index), dominant_value, np.nan)
-        meshes.append(
-            ax.pcolormesh(lon, lat, layer, cmap=cmap, vmin=vmin, vmax=vmax, shading="auto", zorder=2)
-        )
-
-    _draw_geometry(ax, country_geometry(districts), "#111827", 1.1, zorder=6)
-    _draw_districts(ax, districts, selected_district, show_boundaries, show_labels)
-    if show_stations:
-        _draw_stations(ax)
-
-    fig.subplots_adjust(bottom=0.16)
-    ticks = ((35, 45, 55, 65, 75), (35, 45, 55), (35, 45, 55, 65, 75))
-    labels = ("Below normal (%)", "Near normal (%)", "Above normal (%)")
-    positions = ((0.06, 0.045, 0.26, 0.02), (0.38, 0.045, 0.17, 0.02), (0.61, 0.045, 0.26, 0.02))
-    for mesh, label, tick_values, position in zip(meshes, labels, ticks, positions):
-        cax = fig.add_axes(position)
-        colorbar = fig.colorbar(mesh, cax=cax, orientation="horizontal")
-        colorbar.set_label(label, fontsize=8)
-        colorbar.set_ticks(list(tick_values))
-        colorbar.ax.tick_params(labelsize=7)
-    return fig
-
-
 def figure_png_bytes(fig) -> bytes:
     """Render a figure to PNG bytes for a Streamlit download button."""
     buffer = io.BytesIO()

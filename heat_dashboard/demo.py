@@ -120,46 +120,6 @@ def demo_context(product_name: str, view: str, bounds: tuple[float, float, float
     return field, metadata
 
 
-def demo_precip_terciles(period: str, bounds: tuple[float, float, float, float]) -> tuple[xr.DataArray, dict]:
-    """Synthetic precipitation tercile probabilities that sum to 100 %."""
-    from .config import SUBSEASONAL_PERIODS, TERCILE_CATEGORIES
-
-    token, start_day, end_day = SUBSEASONAL_PERIODS[period]
-    lon, lat = _grid(bounds)
-    lon2d, lat2d = np.meshgrid(lon, lat)
-
-    # Wetter signal toward the interior/south, drier toward the coast,
-    # with smooth spatial noise; softmax keeps the three terciles valid.
-    wet_signal = 0.8 - 1.2 * np.clip((lat2d - 1.5) / 5.0, 0, 1)
-    scores = np.stack(
-        [
-            -wet_signal + _smooth_noise(lon2d.shape, _seed("precip-bn", period)) * 0.9,
-            0.15 + _smooth_noise(lon2d.shape, _seed("precip-nn", period)) * 0.5,
-            wet_signal + _smooth_noise(lon2d.shape, _seed("precip-an", period)) * 0.9,
-        ]
-    )
-    weights = np.exp(scores)
-    probabilities = weights / weights.sum(axis=0) * 100.0
-
-    field = xr.DataArray(
-        probabilities.astype("float32"),
-        coords={"category": list(TERCILE_CATEGORIES), "lat": lat, "lon": lon},
-        dims=("category", "lat", "lon"),
-        attrs={"units": "%"},
-    )
-    issuance = date.today()
-    metadata = {
-        "source": "Demo data generator",
-        "product": "Precipitation tercile probabilities",
-        "period": period,
-        "categories": list(TERCILE_CATEGORIES),
-        "valid_start": (issuance + timedelta(days=start_day)).isoformat(),
-        "valid_end": (issuance + timedelta(days=end_day)).isoformat(),
-        "note": "Synthetic field for interface testing; not a forecast.",
-    }
-    return field, metadata
-
-
 def demo_wind(view: str, bounds: tuple[float, float, float, float]) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, dict]:
     """Synthetic trade-wind field; returns (speed, u, v, metadata)."""
     lon, lat = _grid(bounds)

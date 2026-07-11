@@ -18,16 +18,14 @@ from heat_dashboard.config import (
     CONTEXT_PRODUCTS,
     HEAT_PRODUCTS,
     PERCENTILE_THRESHOLDS,
-    SUBSEASONAL_PERIODS,
     SURINAME_BOUNDS,
 )
-from heat_dashboard.demo import demo_context, demo_precip_terciles, demo_probability, demo_wind
+from heat_dashboard.demo import demo_context, demo_probability, demo_wind
 from heat_dashboard.geo import (
     clip_to_geometry,
     country_geometry,
     district_by_name,
     district_statistics,
-    district_tercile_statistics,
     load_districts,
 )
 from heat_dashboard.noaa import (
@@ -36,14 +34,12 @@ from heat_dashboard.noaa import (
     load_context_field,
     load_heat_probability,
     load_percentile_climatology,
-    load_precip_terciles,
     load_wind_field,
 )
 from heat_dashboard.plots import (
     context_map,
     figure_png_bytes,
     probability_map,
-    tercile_map,
     threshold_map,
 )
 
@@ -96,11 +92,6 @@ def cached_wind(level: int, view: str, week: int, bounds):
     return load_wind_field(level, view, week, bounds)
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def cached_terciles(period: str):
-    return load_precip_terciles(period, SURINAME_BOUNDS)
-
-
 def formatted_period(metadata: dict) -> str:
     """Compact validity range that fits inside a metric card."""
     try:
@@ -133,13 +124,10 @@ st.markdown('<div class="dashboard-subtitle">NOAA/CPC GEFS Week 1–2 excessive-
 
 with st.sidebar:
     st.header("Dashboard controls")
-    section = st.radio("Section", ["Heat risk", "Atmospheric context", "Subseasonal precipitation"], horizontal=False)
+    section = st.radio("Section", ["Heat risk", "Atmospheric context"], horizontal=False)
     data_source = st.radio("Data source", ["Live NOAA/CPC", "Demo data"], help="Demo mode keeps the interface testable when the NOAA server is unavailable.")
-    if section == "Subseasonal precipitation":
-        week = 1  # the precipitation section selects its own period below
-    else:
-        week = st.radio("Forecast period", [1, 2], format_func=lambda value: f"Week {value}", horizontal=True)
-        st.caption("Week 1 represents days 1–7; Week 2 represents days 8–14.")
+    week = st.radio("Forecast period", [1, 2], format_func=lambda value: f"Week {value}", horizontal=True)
+    st.caption("Week 1 represents days 1–7; Week 2 represents days 8–14.")
 
     if st.button("Refresh cached NOAA data", use_container_width=True):
         st.cache_data.clear()
@@ -281,7 +269,7 @@ if section == "Heat risk":
             "The original XCast regridding step has been removed. The dashboard reads the NOAA grid with Xarray, normalizes coordinates, clips it directly with the Suriname district geometry, and calculates district summaries from grid-cell centres."
         )
 
-elif section == "Atmospheric context":
+else:
     with st.sidebar:
         context_type = st.selectbox("Product family", ["Scalar field", "Wind"])
         if context_type == "Scalar field":
@@ -344,100 +332,6 @@ elif section == "Atmospheric context":
 
     with st.expander("Data details"):
         st.json(metadata)
-
-else:
-    with st.sidebar:
-        period = st.radio("Forecast period", list(SUBSEASONAL_PERIODS), horizontal=False)
-        st.caption("Week 1 = days 1–7, Week 2 = days 8–14, Week 3–4 = days 15–28.")
-        selected_district = st.selectbox("District", ["All districts"] + [item.name for item in districts])
-        show_boundaries = st.toggle("Show district boundaries", value=True)
-        show_labels = st.toggle("Show district names", value=True)
-        show_stations = st.toggle("Show stations", value=False)
-        clip_country = st.toggle("Clip forecast to Suriname", value=True)
-        st.divider()
-        st.caption(
-            "Raw (uncalibrated) GEFS probabilities for the most likely weekly precipitation tercile relative to climatology: "
-            "below normal (brown), near normal (grey), or above normal (green)."
-        )
-
-    used_demo = data_source == "Demo data"
-    raw_bytes = None
-    try:
-        if used_demo:
-            field, metadata = demo_precip_terciles(period, SURINAME_BOUNDS)
-        else:
-            with st.spinner("Downloading the NOAA/CPC subseasonal tercile product…"):
-                field, metadata, raw_bytes = cached_terciles(period)
-    except NOAADataError as exc:
-        used_demo = True
-        field, metadata = demo_precip_terciles(period, SURINAME_BOUNDS)
-        st.warning(f"Live NOAA data could not be loaded. Demo data is displayed instead. Details: {exc}")
-
-    display_field = clip_to_geometry(field, country) if clip_country else field
-    stats = district_tercile_statistics(field, districts)
-    wettest = stats.loc[stats["Above normal (%)"].idxmax()]
-    driest = stats.loc[stats["Below normal (%)"].idxmax()]
-
-    st.markdown(f'<span class="source-chip">{"Demo data" if used_demo else "Live NOAA/CPC"}</span>', unsafe_allow_html=True)
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Strongest wet signal", str(wettest["District"]), f"Above normal {wettest['Above normal (%)']:.0f}%")
-    kpi2.metric("Strongest dry signal", str(driest["District"]), f"Below normal {driest['Below normal (%)']:.0f}%")
-    kpi3.metric("Valid period", formatted_period(metadata), period)
-
-    period_token = SUBSEASONAL_PERIODS[period][0]
-    title = f"GEFS {period}: most likely precipitation tercile (raw)"
-    extent = map_extent_for_selection(districts, selected_district)
-
-    map_col, table_col = st.columns([1.9, 1.0], gap="large")
-    with map_col:
-        fig = tercile_map(
-            display_field,
-            districts,
-            title,
-            extent,
-            selected_district=None if selected_district == "All districts" else selected_district,
-            show_boundaries=show_boundaries,
-            show_labels=show_labels,
-            show_stations=show_stations,
-        )
-        st.pyplot(fig, use_container_width=True)
-        png = figure_png_bytes(fig)
-        plt.close(fig)
-        st.download_button("Download map as PNG", png, file_name=f"suriname_precip_week{period_token}_terciles.png", mime="image/png", use_container_width=True)
-
-    with table_col:
-        st.subheader("District tercile probabilities")
-        display_stats = stats.drop(columns=["Nearest-grid estimate"]).copy()
-        numeric_cols = display_stats.select_dtypes(include="number").columns
-        display_stats[numeric_cols] = display_stats[numeric_cols].round(1)
-        st.dataframe(display_stats, hide_index=True, use_container_width=True, height=410)
-        csv_bytes = display_stats.to_csv(index=False).encode("utf-8")
-        st.download_button("Download district statistics", csv_bytes, file_name=f"district_terciles_week{period_token}.csv", mime="text/csv", use_container_width=True)
-        if stats["Nearest-grid estimate"].any():
-            st.caption("Small districts without a NOAA grid-cell centre use the nearest grid point; these rows are estimates.")
-
-    dl1, dl2 = st.columns(2)
-    with dl1:
-        st.download_button(
-            "Download processed Suriname subset (NetCDF)",
-            dataarray_to_netcdf_bytes(display_field, "tercile_probability"),
-            file_name=f"suriname_precip_week{period_token}_terciles_processed.nc",
-            mime="application/x-netcdf",
-            use_container_width=True,
-        )
-    with dl2:
-        if raw_bytes is not None:
-            st.download_button("Download original NOAA NetCDF", raw_bytes, file_name=metadata["filename"], mime="application/x-netcdf", use_container_width=True)
-        else:
-            st.button("Original NOAA NetCDF unavailable in demo mode", disabled=True, use_container_width=True)
-
-    with st.expander("Data and processing details"):
-        st.json(metadata)
-        st.markdown(
-            "This section shows the raw GEFS tercile probabilities from the NOAA/CPC subseasonal workflow. "
-            "The calibrated products from the reference tool (CCA, ELR, EPOELM) require model training on hindcasts "
-            "and are intentionally not run inside this dashboard."
-        )
 
 st.divider()
 st.caption(
