@@ -29,6 +29,7 @@ from .config import (
     context_filename,
     context_url,
     wind_filenames,
+    wind_level_tag,
     NOAA_BASE_URL,
 )
 
@@ -259,29 +260,29 @@ def load_percentile_climatology(
 
 _CONTEXT_VARIABLE_TOKENS = {
     "mslp": ("mslp", "slp", "prmsl", "psl"),
-    "z500": ("z500", "hgt500", "500hgt", "gph500", "hgt_500"),
+    "hgt500": ("hgt500", "z500", "500hgt", "gph500"),
     "t2m": ("t2m", "tmp2m", "2mt", "temp2m"),
 }
 
-_VIEW_TOKENS = {
-    "Average": ("avg", "mean", "ave"),
-    "Anomaly": ("anom",),
-    "Climatology": ("climo", "clim"),
-}
 
-_VIEW_EXCLUDE = {
-    "Average": ("anom", "climo", "clim"),
-    "Anomaly": ("climo", "clim"),
-    "Climatology": ("anom",),
-}
+def _view_tokens(base: str, view: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(required, excluded) tokens telling weekly-mean files from anomalies.
+
+    NOAA appends ``t`` (total/mean) or ``a`` (anomaly) to the variable name:
+    ``wk1_mslpt.nc`` vs ``wk1_mslpa.nc``.
+    """
+    if view == "Anomaly":
+        return ((f"{base}a", f"{base}_a", "anom"), ("climo", "clim"))
+    return ((f"{base}t", f"{base}_t", "avg", "mean"), (f"{base}a.", f"{base}_a", "anom", "climo", "clim"))
 
 
 def _load_context_view(variable: str, view: str, week: int, bounds) -> tuple[xr.DataArray, str]:
+    required, excluded = _view_tokens(variable, view)
     url, raw = _resolve_and_download(
         [context_url(context_filename(variable, view, week))],
         CONTEXT_LISTING_DIRECTORIES,
-        [_CONTEXT_VARIABLE_TOKENS.get(variable, (variable,)), _week_tokens(week), _VIEW_TOKENS[view]],
-        _VIEW_EXCLUDE[view],
+        [_CONTEXT_VARIABLE_TOKENS.get(variable, (variable,)), _week_tokens(week), required],
+        excluded,
         f"{variable} {view} week {week}",
     )
     return _decode(raw, url, bounds), url
@@ -327,31 +328,46 @@ def load_context_field(
     return field, metadata
 
 
+def _load_wind_component(component: str, level: int, view: str, week: int, bounds) -> tuple[xr.DataArray, str]:
+    tag = wind_level_tag(level)
+    base = f"{component}{tag}"
+    required, excluded = _view_tokens(base, view)
+    u_name, v_name = wind_filenames(level, view, week)
+    url, raw = _resolve_and_download(
+        [context_url(u_name if component == "u" else v_name)],
+        CONTEXT_LISTING_DIRECTORIES,
+        [(base, f"{component}wnd{tag}", f"{component}grd{tag}"), _week_tokens(week), required],
+        excluded,
+        f"{component}-wind {level} {view} week {week}",
+    )
+    return _decode(raw, url, bounds), url
+
+
 def load_wind_field(
     level: int,
     view: str,
     week: int,
     bounds: tuple[float, float, float, float],
 ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, dict]:
-    """Load wind components and speed for one level; returns (speed, u, v, metadata)."""
-    u_name, v_name = wind_filenames(level, view, week)
-    level_tokens = ("10m", "u10", "v10") if level == 10 else (str(level),)
-    u_url, u_raw = _resolve_and_download(
-        [context_url(u_name)],
-        CONTEXT_LISTING_DIRECTORIES,
-        [("uwnd", "ugrd", "u_"), level_tokens, _week_tokens(week), _VIEW_TOKENS[view]],
-        _VIEW_EXCLUDE[view],
-        f"u-wind {level} {view} week {week}",
-    )
-    v_url, v_raw = _resolve_and_download(
-        [context_url(v_name)],
-        CONTEXT_LISTING_DIRECTORIES,
-        [("vwnd", "vgrd", "v_"), level_tokens, _week_tokens(week), _VIEW_TOKENS[view]],
-        _VIEW_EXCLUDE[view],
-        f"v-wind {level} {view} week {week}",
-    )
-    u = _decode(u_raw, u_url, bounds)
-    v = _decode(v_raw, v_url, bounds)
+    """Load wind components and speed for one level; returns (speed, u, v, metadata).
+
+    The published views are the weekly mean (``wk1_u850t.nc``) and the
+    anomaly (``wk1_u850a.nc``); climatology is derived as mean − anomaly.
+    """
+    if view == "Climatology":
+        u_mean, u_mean_url = _load_wind_component("u", level, "Average", week, bounds)
+        u_anom, u_anom_url = _load_wind_component("u", level, "Anomaly", week, bounds)
+        v_mean, v_mean_url = _load_wind_component("v", level, "Average", week, bounds)
+        v_anom, v_anom_url = _load_wind_component("v", level, "Anomaly", week, bounds)
+        u_mean, u_anom = xr.align(u_mean, u_anom, join="inner")
+        v_mean, v_anom = xr.align(v_mean, v_anom, join="inner")
+        u = u_mean - u_anom
+        v = v_mean - v_anom
+        urls = [u_mean_url, u_anom_url, v_mean_url, v_anom_url]
+    else:
+        u, u_url = _load_wind_component("u", level, view, week, bounds)
+        v, v_url = _load_wind_component("v", level, view, week, bounds)
+        urls = [u_url, v_url]
     u, v = xr.align(u, v, join="inner")
     speed = np.hypot(u, v)
     speed.attrs["units"] = "m/s"
@@ -363,8 +379,8 @@ def load_wind_field(
         "view": view,
         "week": week,
         "unit": "m/s",
-        "url": [u_url, v_url],
-        "filename": [u_url.rsplit("/", 1)[-1], v_url.rsplit("/", 1)[-1]],
+        "url": urls,
+        "filename": [item.rsplit("/", 1)[-1] for item in urls],
         "valid_start": valid_start,
         "valid_end": valid_end,
     }

@@ -177,6 +177,49 @@ def test_load_heat_probability_pipeline_with_mocked_download(monkeypatch):
     assert np.nanmax(values) <= 100.0 and np.nanmax(values) > 1.5  # rescaled to percent
 
 
+def test_context_and_wind_urls_follow_documented_pattern():
+    from heat_dashboard.config import (
+        CONTEXT_PRODUCTS,
+        context_filename,
+        context_url,
+        wind_filenames,
+    )
+
+    base = "https://ftp.cpc.ncep.noaa.gov/International/PREPARE_africa/subseasonal/realtime/data/"
+    # Examples straight from the supplied links.
+    assert context_url(context_filename("mslp", "Average", 1)) == base + "wk1_mslpt.nc"
+    assert context_url(context_filename("mslp", "Anomaly", 1)) == base + "wk1_mslpa.nc"
+    assert context_url(context_filename("hgt500", "Average", 1)) == base + "wk1_hgt500t.nc"
+    assert context_url(context_filename("hgt500", "Anomaly", 1)) == base + "wk1_hgt500a.nc"
+    assert wind_filenames(850, "Average", 1) == ("wk1_u850t.nc", "wk1_v850t.nc")
+    assert wind_filenames(850, "Anomaly", 1) == ("wk1_u850a.nc", "wk1_v850a.nc")
+    assert wind_filenames(10, "Average", 2) == ("wk2_u10mt.nc", "wk2_v10mt.nc")
+    assert CONTEXT_PRODUCTS["500-hPa geopotential height"].variable == "hgt500"
+    # No climatology files exist: every product derives it as mean - anomaly.
+    for product in CONTEXT_PRODUCTS.values():
+        assert "Climatology" not in product.views
+
+
+def test_wind_climatology_is_mean_minus_anomaly(monkeypatch):
+    import heat_dashboard.noaa as noaa
+    from heat_dashboard.config import SURINAME_BOUNDS
+
+    def fake_component(component, level, view, week, bounds):
+        value = {"Average": 8.0, "Anomaly": 2.0}[view] * (1 if component == "u" else 0.5)
+        field = xr.DataArray(
+            np.full((3, 3), value, dtype="float32"),
+            coords={"lat": [3.0, 4.0, 5.0], "lon": [-57.0, -56.0, -55.0]},
+            dims=("lat", "lon"),
+        )
+        return field, f"https://example/wk1_{component}850{'t' if view == 'Average' else 'a'}.nc"
+
+    monkeypatch.setattr(noaa, "_load_wind_component", fake_component)
+    speed, u, v, metadata = noaa.load_wind_field(850, "Climatology", 1, SURINAME_BOUNDS)
+    assert float(u.values.mean()) == 6.0  # 8 - 2
+    assert float(v.values.mean()) == 3.0  # 4 - 1
+    assert len(metadata["url"]) == 4
+
+
 def test_every_product_has_at_least_two_fixed_thresholds():
     # app.py defaults to fixed_thresholds[-2], which requires length >= 2
     for product in HEAT_PRODUCTS.values():

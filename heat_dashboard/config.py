@@ -156,21 +156,25 @@ class ContextProduct:
     views: tuple[str, ...] = field(default=("Average", "Anomaly", "Climatology"))
 
 
+#: NOAA publishes each context field as a weekly mean (``...t.nc``) and an
+#: anomaly (``...a.nc``); climatology is always derived as mean − anomaly.
 CONTEXT_PRODUCTS: dict[str, ContextProduct] = {
     "Mean sea-level pressure": ContextProduct(
         variable="mslp",
         unit="hPa",
         description="Week-mean sea-level pressure.",
+        views=("Average", "Anomaly"),
     ),
     "500-hPa geopotential height": ContextProduct(
-        variable="z500",
+        variable="hgt500",
         unit="gpm",
         description="Week-mean 500-hPa geopotential height.",
+        views=("Average", "Anomaly"),
     ),
     "2-m air temperature": ContextProduct(
         variable="t2m",
         unit="°C",
-        description="Week-mean 2-m air temperature. Climatology is reconstructed as average minus anomaly.",
+        description="Week-mean 2-m air temperature.",
         views=("Average", "Anomaly"),
     ),
 }
@@ -179,24 +183,31 @@ CONTEXT_PRODUCTS: dict[str, ContextProduct] = {
 WIND_LEVELS = (925, 850, 700, 200, 10)
 
 
-def wind_filenames(level: int, view: str, week: int) -> tuple[str, str]:
-    """Best-guess (u, v) NetCDF filenames for a wind level and view.
+#: Filename suffix per published view: weekly mean (total) or anomaly.
+VIEW_SUFFIXES = {"Average": "t", "Anomaly": "a"}
 
-    The circulation files are not covered by the documented heat-product
-    naming, so these follow the same ``wk{week}_...`` style and the loader
-    falls back to directory-listing discovery when they miss.
+
+def wind_level_tag(level: int) -> str:
+    return "10m" if level == 10 else f"{level}"
+
+
+def wind_filenames(level: int, view: str, week: int) -> tuple[str, str]:
+    """The documented (u, v) NetCDF filenames for a wind level and view.
+
+    Example: 850-hPa week-1 mean wind is ``wk1_u850t.nc``/``wk1_v850t.nc``
+    and its anomaly ``wk1_u850a.nc``/``wk1_v850a.nc``.
     """
-    suffix = {"Average": "avg", "Anomaly": "anom", "Climatology": "climo"}[view]
-    tag = "10m" if level == 10 else f"{level}"
+    suffix = VIEW_SUFFIXES[view]
+    tag = wind_level_tag(level)
     return (
-        f"wk{week}_uwnd{tag}_{suffix}.nc",
-        f"wk{week}_vwnd{tag}_{suffix}.nc",
+        f"wk{week}_u{tag}{suffix}.nc",
+        f"wk{week}_v{tag}{suffix}.nc",
     )
 
 
 def context_filename(variable: str, view: str, week: int) -> str:
-    suffix = {"Average": "avg", "Anomaly": "anom", "Climatology": "climo"}[view]
-    return f"wk{week}_{variable}_{suffix}.nc"
+    """Documented context filename, e.g. ``wk1_mslpt.nc`` / ``wk1_mslpa.nc``."""
+    return f"wk{week}_{variable}{VIEW_SUFFIXES[view]}.nc"
 
 
 def context_url(filename: str) -> str:

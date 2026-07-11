@@ -275,11 +275,11 @@ else:
         if context_type == "Scalar field":
             context_product = st.selectbox("Atmospheric product", list(CONTEXT_PRODUCTS))
             view = st.radio("Display", ["Average", "Anomaly", "Climatology"])
-            if context_product == "2-m air temperature" and view == "Climatology":
-                st.caption("Climatology is reconstructed as average minus anomaly.")
         else:
             level = st.selectbox("Wind level", [925, 850, 700, 200, 10], format_func=lambda value: "10 m" if value == 10 else f"{value} hPa")
             view = st.radio("Display", ["Average", "Anomaly", "Climatology"])
+        if view == "Climatology":
+            st.caption("Climatology is reconstructed as weekly mean minus anomaly.")
         buffer_deg = st.slider("Regional context buffer", 0, 15, 8, help="Adds degrees around Suriname for synoptic context.")
 
     west, east, south, north = SURINAME_BOUNDS

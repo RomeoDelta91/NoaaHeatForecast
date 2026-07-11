@@ -55,6 +55,13 @@ threshold must hold for at least three consecutive days — for example
 `wk1_tmax35_c3.nc` or `wk2_himax35_c3.nc`. The percentile climatologies
 follow `wk{week}_{product}climo{percentile}.nc` (e.g. `wk1_tmaxclimo90.nc`).
 
+The atmospheric-context fields use `wk{week}_{variable}{view}.nc`, where
+the view suffix is `t` for the weekly mean (total) and `a` for the anomaly
+— for example `wk1_mslpt.nc`/`wk1_mslpa.nc` for sea-level pressure,
+`wk1_hgt500t.nc` for 500-hPa height, and `wk1_u850t.nc`/`wk1_v850t.nc` for
+the 850-hPa wind components. No climatology files are published for these
+fields; the app reconstructs climatology as weekly mean minus anomaly.
+
 All URL templates live in `heat_dashboard/config.py`. When an exact
 filename returns 404, the loader downloads the directory listings named in
 `HEAT_LISTING_DIRECTORIES`/`CONTEXT_LISTING_DIRECTORIES`, extracts the
