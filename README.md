@@ -115,6 +115,11 @@ No passwords or Streamlit secrets are required. The app downloads public NOAA/CP
 - District area-at-risk values are approximate because the source products are gridded and relatively coarse.
 - This application is a visualization and decision-support tool, not an official warning product.
 
+## Author
+
+Gemaakt door: **Ritesh Rajai** — a personal project developed in private
+time; not a product of the Meteorological Service of Suriname.
+
 ## Acknowledgement
 
 The supplied reference shell workflow identifies Endalkachew Bekele, NOAA/CPC/International Desks (October 2024) as its author. See `THIRD_PARTY_NOTICE.md`.
