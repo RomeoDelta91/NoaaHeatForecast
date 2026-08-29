@@ -7,3 +7,8 @@ venv/
 .streamlit/secrets.toml
 .pytest_cache/
 *.log
+
+# Web dashboard
+web/node_modules/
+web/dist/
+web/public/data/

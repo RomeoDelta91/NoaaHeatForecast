@@ -1,0 +1,76 @@
+name: Publish dashboard
+
+# Refreshes the NOAA data and republishes the static React dashboard.
+# GitHub's runners can reach ftp.cpc.ncep.noaa.gov, so the scheduled run
+# is what turns the demo fallback into live guidance.
+
+on:
+  schedule:
+    # 07:30 and 19:30 UTC, after the CPC products are normally posted.
+    - cron: '30 7,19 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'heat_dashboard/**'
+      - 'scripts/build_web_data.py'
+      - '.github/workflows/publish-dashboard.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pip install pytest && pytest -q
+
+      - name: Download NOAA data and build the JSON dataset
+        run: python scripts/build_web_data.py
+        # A NOAA outage must not break the deploy: the script falls back to
+        # demo fields per product and the site labels them as such.
+        continue-on-error: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the React dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

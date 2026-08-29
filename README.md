@@ -71,6 +71,17 @@ them between the listed directories. Whenever every lookup fails the app
 shows a warning listing the URLs it tried and falls back to demo data, so
 the interface keeps working while paths are stale.
 
+## Web version (React)
+
+Besides the Streamlit app there is a static React build in `web/`, meant to
+be linked from an existing website. Because a browser cannot fetch NOAA's
+NetCDF files itself (no CORS headers, HDF5 payloads),
+`scripts/build_web_data.py` runs this same Python pipeline server-side and
+writes small JSON files that the site loads on demand. See
+[`web/README.md`](web/README.md) for build and hosting instructions;
+`.github/workflows/publish-dashboard.yml` refreshes and republishes it
+twice a day via GitHub Pages.
+
 ## Run locally
 
 Use Python 3.12.
