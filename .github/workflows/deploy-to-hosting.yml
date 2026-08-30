@@ -1,0 +1,120 @@
+name: Deploy dashboard to web hosting
+
+# Downloads fresh NOAA data, builds the dashboard, and uploads it straight
+# to your own web hosting over FTPS/SFTP. Nothing to do by hand: the whole
+# refresh runs on GitHub's servers, which can reach ftp.cpc.ncep.noaa.gov.
+#
+# One-time setup — repository Settings -> Secrets and variables -> Actions:
+#   FTP_SERVER    hostname only, e.g. ftp.your-domain.com (no ftp:// prefix)
+#   FTP_USERNAME  the FTP/SFTP account
+#   FTP_PASSWORD  its password
+#   FTP_DIR       target folder, WITH a trailing slash,
+#                 e.g. public_html/heat-dashboard/
+# Optional repository *variable* (not a secret):
+#   FTP_PROTOCOL  ftps (default), ftp, or sftp
+#
+# The upload is incremental: only files that actually changed are sent, so
+# a routine refresh moves a few hundred kilobytes rather than the full site.
+
+on:
+  schedule:
+    # 07:40 and 19:40 UTC, shortly after the CPC products are normally posted.
+    - cron: '40 7,19 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'heat_dashboard/**'
+      - 'scripts/build_web_data.py'
+      - '.github/workflows/deploy-to-hosting.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-hosting
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the hosting secrets exist
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_DIR: ${{ secrets.FTP_DIR }}
+        run: |
+          missing=""
+          [ -z "$FTP_SERVER" ]   && missing="$missing FTP_SERVER"
+          [ -z "$FTP_USERNAME" ] && missing="$missing FTP_USERNAME"
+          [ -z "$FTP_PASSWORD" ] && missing="$missing FTP_PASSWORD"
+          [ -z "$FTP_DIR" ]      && missing="$missing FTP_DIR"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          case "$FTP_DIR" in
+            */) ;;
+            *) echo "::error::FTP_DIR must end with a slash, e.g. public_html/heat-dashboard/"; exit 1 ;;
+          esac
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download NOAA data and build the JSON dataset
+        id: dataset
+        run: python scripts/build_web_data.py
+
+      - name: Report how much of the dataset is live
+        if: always() && steps.dataset.outcome != 'skipped'
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          index = pathlib.Path('web/public/data/index.json')
+          if not index.exists():
+              print('::error::No dataset was produced; keeping the currently published site.')
+              sys.exit(1)
+          data = json.loads(index.read_text())
+          live, demo = data['liveCount'], data['demoCount']
+          print(f'{live} live fields, {demo} demo fields, generated {data["generatedAt"]}')
+          if live == 0:
+              print('::warning::NOAA was unreachable for every product; uploading demo data.')
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload to your hosting
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+          local-dir: ./web/dist/
+          server-dir: ${{ secrets.FTP_DIR }}
+          # Never touch anything else living on the same hosting account.
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**

@@ -1,7 +1,23 @@
 // Fetches the pre-generated JSON dataset. Everything is static, so a simple
 // in-memory cache is enough: each field is downloaded at most once per visit.
 
-const BASE = `${import.meta.env.BASE_URL || './'}data/`.replace(/\/{2,}/g, '/');
+/**
+ * Where the JSON dataset lives.
+ *
+ * By default it sits next to index.html, so the whole site is one folder.
+ * Setting VITE_DATA_BASE_URL at build time points the app at an absolute
+ * URL instead — useful when the page is uploaded once to your own hosting
+ * while the data keeps refreshing somewhere else (that host must send
+ * Access-Control-Allow-Origin; GitHub Pages does).
+ */
+function resolveBase() {
+  const configured = (import.meta.env.VITE_DATA_BASE_URL || '').trim();
+  if (configured) return configured.endsWith('/') ? configured : `${configured}/`;
+  const prefix = import.meta.env.BASE_URL || './';
+  return `${prefix.endsWith('/') ? prefix : `${prefix}/`}data/`;
+}
+
+const BASE = resolveBase();
 const cache = new Map();
 
 async function getJson(path) {
